@@ -1,0 +1,149 @@
+@startuml TurnoPlus_Sequence_AutoReminders
+title Secuencia: Envío de Recordatorios Automáticos
+
+participant "Cron Scheduler" as Scheduler
+participant "Notification Service" as NotificationSvc
+participant "Database" as DB
+participant "Email Provider" as EmailProvider
+participant "SMS Provider" as SMSProvider
+participant "Cache" as Cache
+participant "Logging Service" as LoggingSvc
+
+== Ejecución Programada Diaria ==
+
+Scheduler -> NotificationSvc: TRIGGER daily_reminder_job()
+note right: Ejecuta diariamente a las 18:00 UTC
+activate NotificationSvc
+
+NotificationSvc -> NotificationSvc: log_job_start()
+NotificationSvc -> LoggingSvc: LOG job_started
+activate LoggingSvc
+deactivate LoggingSvc
+
+== Consulta de Turnos para Recordatorio ==
+
+NotificationSvc -> DB: SELECT confirmed appointments for tomorrow
+note right: Query:\nSELECT a.*, c.*, b.*, s.*\nFROM appointments a\nJOIN customers c ON a.customer_id = c.id\nJOIN businesses b ON a.business_id = b.id\nJOIN services s ON a.service_id = s.id\nWHERE a.status = 'confirmed'\nAND a.appointment_date = CURRENT_DATE + 1\nAND a.reminder_sent_at IS NULL
+
+activate DB
+DB --> NotificationSvc: appointments_for_reminder[]
+deactivate DB
+
+NotificationSvc -> NotificationSvc: filter_eligible_appointments()
+
+== Procesamiento de Recordatorios ==
+
+loop Para cada turno elegible
+    NotificationSvc -> NotificationSvc: prepare_reminder_data()
+    
+    == Verificación de Configuraciones ==
+    NotificationSvc -> Cache: GET business_settings_:business_id
+    activate Cache
+    
+    alt Cache hit
+        Cache --> NotificationSvc: business_settings
+    else Cache miss
+        Cache --> NotificationSvc: MISS
+        NotificationSvc -> DB: SELECT settings FROM business_settings WHERE business_id = ?
+        activate DB
+        DB --> NotificationSvc: settings_data
+        deactivate DB
+        
+        NotificationSvc -> Cache: SET business_settings (TTL: 4h)
+    end
+    deactivate Cache
+    
+    NotificationSvc -> NotificationSvc: check_reminder_preferences()
+    
+    alt Recordatorios habilitados
+        == Generación de Contenido ==
+        NotificationSvc -> NotificationSvc: generate_reminder_template()
+        
+        == Envío de Email ==
+        alt Email habilitado
+            NotificationSvc -> EmailProvider: send_reminder_email()
+            activate EmailProvider
+            
+            alt Email enviado exitosamente
+                EmailProvider --> NotificationSvc: {success: true, message_id: "msg_123"}
+                NotificationSvc -> NotificationSvc: log_email_success()
+            else Error en envío
+                EmailProvider --> NotificationSvc: {success: false, error: "reason"}
+                NotificationSvc -> NotificationSvc: log_email_failure()
+            end
+            deactivate EmailProvider
+        end
+        
+        == Envío de SMS ==
+        alt SMS habilitado y teléfono válido
+            NotificationSvc -> SMSProvider: send_reminder_sms()
+            activate SMSProvider
+            
+            alt SMS enviado exitosamente
+                SMSProvider --> NotificationSvc: {success: true, sid: "sms_456"}
+                NotificationSvc -> NotificationSvc: log_sms_success()
+            else Error en envío
+                SMSProvider --> NotificationSvc: {success: false, error: "reason"}
+                NotificationSvc -> NotificationSvc: log_sms_failure()
+            end
+            deactivate SMSProvider
+        end
+        
+        == Actualización de Estado ==
+        NotificationSvc -> DB: UPDATE appointments SET reminder_sent_at = NOW() WHERE id = ?
+        activate DB
+        DB --> NotificationSvc: update_success
+        deactivate DB
+        
+        NotificationSvc -> DB: INSERT INTO notifications (type='reminder_sent')
+        activate DB
+        DB --> NotificationSvc: notification_id
+        deactivate DB
+        
+    else Recordatorios deshabilitados
+        NotificationSvc -> NotificationSvc: skip_appointment()
+    end
+    
+    NotificationSvc -> NotificationSvc: increment_processing_counter()
+end
+
+== Resumen y Logging ==
+
+NotificationSvc -> NotificationSvc: generate_job_summary()
+NotificationSvc -> LoggingSvc: LOG job_completed
+activate LoggingSvc
+LoggingSvc -> LoggingSvc: store_job_metrics()
+deactivate LoggingSvc
+
+NotificationSvc -> Cache: SET daily_reminder_stats (TTL: 24h)
+activate Cache
+Cache -> Cache: store_processing_metrics()
+deactivate Cache
+
+== Manejo de Errores y Reintentos ==
+
+opt Si hay fallos en envíos
+    NotificationSvc -> NotificationSvc: schedule_retry_job()
+    NotificationSvc -> DB: INSERT INTO failed_notifications FOR retry
+    activate DB
+    DB --> NotificationSvc: retry_job_scheduled
+    deactivate DB
+end
+
+== Notificación a Administradores ==
+
+NotificationSvc -> NotificationSvc: check_error_threshold()
+
+alt Errores exceden umbral
+    NotificationSvc -> EmailProvider: send_admin_alert()
+    activate EmailProvider
+    EmailProvider --> NotificationSvc: alert_sent
+    deactivate EmailProvider
+end
+
+NotificationSvc -> NotificationSvc: cleanup_temporary_data()
+deactivate NotificationSvc
+
+note over Scheduler, SMSProvider: Resumen del job:\n- Turnos procesados: X\n- Emails enviados: Y\n- SMS enviados: Z\n- Errores: W\n- Duración: T segundos
+
+@enduml

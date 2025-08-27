@@ -1,0 +1,188 @@
+@startuml TurnoPlus_ERD
+!define ENTITY class
+!define PK <<PK>>
+!define FK <<FK>>
+!define UNQ <<UNQ>>
+
+' Entidad: Usuarios del sistema (administradores y profesionales)
+ENTITY users {
+    + id : INT PK
+    --
+    email : VARCHAR(255) UNQ
+    password_hash : VARCHAR(255)
+    first_name : VARCHAR(100)
+    last_name : VARCHAR(100)
+    phone : VARCHAR(20)
+    role : ENUM('admin', 'professional')
+    is_active : BOOLEAN
+    email_verified_at : TIMESTAMP
+    created_at : TIMESTAMP
+    updated_at : TIMESTAMP
+}
+
+' Entidad: Negocios/Consultorios
+ENTITY businesses {
+    + id : INT PK
+    --
+    name : VARCHAR(255)
+    description : TEXT
+    address : VARCHAR(500)
+    phone : VARCHAR(20)
+    email : VARCHAR(255)
+    website : VARCHAR(255)
+    timezone : VARCHAR(50)
+    is_active : BOOLEAN
+    created_at : TIMESTAMP
+    updated_at : TIMESTAMP
+}
+
+' Entidad: Relación usuarios-negocios (un usuario puede trabajar en varios negocios)
+ENTITY user_businesses {
+    + id : INT PK
+    --
+    user_id : INT FK
+    business_id : INT FK
+    role : ENUM('owner', 'employee')
+    is_active : BOOLEAN
+    created_at : TIMESTAMP
+    updated_at : TIMESTAMP
+}
+
+' Entidad: Servicios ofrecidos por el negocio
+ENTITY services {
+    + id : INT PK
+    --
+    business_id : INT FK
+    name : VARCHAR(255)
+    description : TEXT
+    duration_minutes : INT
+    price : DECIMAL(10,2)
+    is_active : BOOLEAN
+    created_at : TIMESTAMP
+    updated_at : TIMESTAMP
+}
+
+' Entidad: Horarios de trabajo del negocio
+ENTITY business_schedules {
+    + id : INT PK
+    --
+    business_id : INT FK
+    day_of_week : TINYINT
+    start_time : TIME
+    end_time : TIME
+    is_active : BOOLEAN
+    created_at : TIMESTAMP
+    updated_at : TIMESTAMP
+}
+
+' Entidad: Clientes (sin necesidad de registro completo)
+ENTITY customers {
+    + id : INT PK
+    --
+    first_name : VARCHAR(100)
+    last_name : VARCHAR(100)
+    email : VARCHAR(255)
+    phone : VARCHAR(20)
+    created_at : TIMESTAMP
+    updated_at : TIMESTAMP
+}
+
+' Entidad: Reservas/Turnos
+ENTITY appointments {
+    + id : INT PK
+    --
+    business_id : INT FK
+    service_id : INT FK
+    customer_id : INT FK
+    user_id : INT FK
+    appointment_date : DATE
+    start_time : TIME
+    end_time : TIME
+    status : ENUM('pending', 'confirmed', 'cancelled', 'completed', 'no_show')
+    notes : TEXT
+    confirmation_token : VARCHAR(255) UNQ
+    confirmed_at : TIMESTAMP
+    reminder_sent_at : TIMESTAMP
+    created_at : TIMESTAMP
+    updated_at : TIMESTAMP
+}
+
+' Entidad: Configuraciones del negocio
+ENTITY business_settings {
+    + id : INT PK
+    --
+    business_id : INT FK
+    setting_key : VARCHAR(100)
+    setting_value : TEXT
+    created_at : TIMESTAMP
+    updated_at : TIMESTAMP
+}
+
+' Entidad: Notificaciones del sistema
+ENTITY notifications {
+    + id : INT PK
+    --
+    user_id : INT FK
+    appointment_id : INT FK
+    type : ENUM('appointment_created', 'appointment_confirmed', 'appointment_cancelled', 'reminder')
+    title : VARCHAR(255)
+    message : TEXT
+    is_read : BOOLEAN
+    sent_at : TIMESTAMP
+    created_at : TIMESTAMP
+}
+
+' Entidad: Excepciones de horarios (feriados, vacaciones, etc.)
+ENTITY schedule_exceptions {
+    + id : INT PK
+    --
+    business_id : INT FK
+    exception_date : DATE
+    is_closed : BOOLEAN
+    start_time : TIME
+    end_time : TIME
+    reason : VARCHAR(255)
+    created_at : TIMESTAMP
+    updated_at : TIMESTAMP
+}
+
+' Entidad: Integración con Google Calendar
+ENTITY google_calendar_integrations {
+    + id : INT PK
+    --
+    user_id : INT FK
+    business_id : INT FK
+    google_calendar_id : VARCHAR(255)
+    access_token : TEXT
+    refresh_token : TEXT
+    token_expires_at : TIMESTAMP
+    is_active : BOOLEAN
+    created_at : TIMESTAMP
+    updated_at : TIMESTAMP
+}
+
+' Relaciones
+users ||--o{ user_businesses : "trabaja en"
+businesses ||--o{ user_businesses : "tiene empleados"
+businesses ||--o{ services : "ofrece"
+businesses ||--o{ business_schedules : "tiene horarios"
+businesses ||--o{ appointments : "recibe reservas"
+businesses ||--o{ business_settings : "tiene configuraciones"
+businesses ||--o{ schedule_exceptions : "tiene excepciones"
+businesses ||--o{ google_calendar_integrations : "integra con"
+
+services ||--o{ appointments : "se reserva en"
+customers ||--o{ appointments : "realiza"
+users ||--o{ appointments : "atiende"
+users ||--o{ notifications : "recibe"
+users ||--o{ google_calendar_integrations : "configura"
+
+appointments ||--o{ notifications : "genera"
+
+' Índices únicos compuestos
+note top of user_businesses : "UNIQUE(user_id, business_id)"
+note top of business_schedules : "UNIQUE(business_id, day_of_week, start_time)"
+note top of business_settings : "UNIQUE(business_id, setting_key)"
+note top of schedule_exceptions : "UNIQUE(business_id, exception_date)"
+
+@enduml

@@ -1,0 +1,167 @@
+@startuml TurnoPlus_Architecture
+!theme plain
+skinparam componentStyle rectangle
+
+title Arquitectura del Sistema TurnoPlus
+
+' ==================== FRONTEND LAYER ====================
+package "Frontend Layer" {
+    component [React SPA\n- React 18+\n- TypeScript\n- Tailwind CSS\n- React Router\n- Redux Toolkit] as ReactApp
+    
+    component [Mobile App\n- React Native\n- Expo\n- Native Navigation] as MobileApp
+    
+    component [Admin Dashboard\n- Vue.js 3\n- Vuetify\n- Pinia Store] as AdminDash
+}
+
+' ==================== API GATEWAY ====================
+cloud "API Gateway\n- Rate Limiting\n- Authentication\n- Load Balancing\n- Request Routing\n- SSL Termination" as Gateway
+
+' ==================== BACKEND SERVICES ====================
+package "Backend Services" {
+    
+    component [Auth Service\n- JWT Authentication\n- User Management\n- Role-based Access\n- Email Verification\n- Password Reset] as AuthService
+    
+    component [Business Service\n- Business CRUD\n- Settings Management\n- Schedule Configuration\n- Team Management] as BusinessService
+    
+    component [Appointment Service\n- Booking Logic\n- Availability Calculation\n- Conflict Resolution\n- Status Management] as AppointmentService
+    
+    component [Notification Service\n- Email Templates\n- SMS Integration\n- Push Notifications\n- Reminder Scheduling] as NotificationService
+    
+    component [Calendar Service\n- Google Calendar API\n- Outlook Integration\n- iCal Export\n- Sync Management] as CalendarService
+    
+    component [Analytics Service\n- Business Intelligence\n- Report Generation\n- Data Aggregation\n- Export Functions] as AnalyticsService
+    
+    component [File Service\n- Image Upload\n- Document Storage\n- CDN Integration\n- File Processing] as FileService
+}
+
+' ==================== SHARED INFRASTRUCTURE ====================
+package "Shared Infrastructure" {
+    
+    component [Message Queue\n- Redis/RabbitMQ\n- Event Publishing\n- Async Processing\n- Dead Letter Queue] as MessageQueue
+    
+    component [Cache Layer\n- Redis Cluster\n- Session Storage\n- Query Caching\n- Rate Limit Store] as CacheLayer
+    
+    component [Logging Service\n- Centralized Logging\n- Error Tracking\n- Performance Monitoring\n- Alert Management] as LoggingService
+    
+    component [Configuration Service\n- Environment Variables\n- Feature Flags\n- Dynamic Configuration\n- Secret Management] as ConfigService
+}
+
+' ==================== DATA LAYER ====================
+package "Data Layer" {
+    
+    database "Primary Database\nPostgreSQL 15+\n---\n- Users & Authentication\n- Businesses & Settings\n- Appointments & Schedules\n- Services & Customers\n- Audit Logs" as PrimaryDB
+    
+    database "Analytics Database\nPostgreSQL / ClickHouse\n---\n- Aggregated Data\n- Historical Reports\n- Business Intelligence\n- Performance Metrics" as AnalyticsDB
+    
+    database "Cache Database\nRedis Cluster\n---\n- Session Data\n- Temporary Tokens\n- Rate Limiting\n- Quick Lookups" as CacheDB
+    
+    database "File Storage\nAWS S3 / MinIO\n---\n- Business Images\n- User Avatars\n- Document Storage\n- Backup Files" as FileStorage
+}
+
+' ==================== EXTERNAL SERVICES ====================
+package "External Services" {
+    
+    cloud "Email Provider\nSendGrid / AWS SES\n---\n- Transactional Emails\n- Marketing Campaigns\n- Email Templates\n- Delivery Analytics" as EmailProvider
+    
+    cloud "SMS Provider\nTwilio / AWS SNS\n---\n- SMS Notifications\n- WhatsApp Integration\n- Voice Calls\n- International Support" as SMSProvider
+    
+    cloud "Google APIs\nGoogle Calendar\nGoogle Maps\nGoogle Auth\n---\n- Calendar Sync\n- Location Services\n- OAuth Integration" as GoogleAPIs
+    
+    cloud "Payment Gateway\nStripe / PayPal\n---\n- Payment Processing\n- Subscription Management\n- Invoice Generation\n- Refund Handling" as PaymentGateway
+    
+    cloud "CDN\nCloudFlare / AWS CloudFront\n---\n- Static Asset Delivery\n- Image Optimization\n- Global Caching\n- DDoS Protection" as CDN
+}
+
+' ==================== DEPLOYMENT INFRASTRUCTURE ====================
+package "Infrastructure" {
+    
+    cloud "Container Orchestration\nKubernetes / Docker Swarm\n---\n- Service Discovery\n- Auto Scaling\n- Health Checks\n- Rolling Deployments" as K8s
+    
+    cloud "CI/CD Pipeline\nGitHub Actions / GitLab CI\n---\n- Automated Testing\n- Code Quality Checks\n- Deployment Automation\n- Environment Management" as CICD
+    
+    cloud "Monitoring & Observability\nPrometheus + Grafana\nElasticsearch + Kibana\n---\n- Application Metrics\n- Infrastructure Monitoring\n- Log Aggregation\n- Alerting System" as Monitoring
+    
+    cloud "Security & Compliance\n- SSL/TLS Encryption\n- WAF Protection\n- Data Encryption at Rest\n- GDPR Compliance\n- Security Auditing" as Security
+}
+
+' ==================== ACTORS ====================
+actor "Customer" as Customer
+actor "Business Owner" as BusinessOwner
+actor "Professional" as Professional
+actor "System Admin" as SystemAdmin
+
+' ==================== CONNECTIONS ====================
+
+' Frontend to API Gateway
+Customer --> ReactApp : "Web Access"
+Customer --> MobileApp : "Mobile Access"
+BusinessOwner --> ReactApp : "Business Management"
+Professional --> ReactApp : "Daily Operations"
+SystemAdmin --> AdminDash : "System Administration"
+
+ReactApp --> Gateway : "HTTPS/REST API"
+MobileApp --> Gateway : "HTTPS/REST API"
+AdminDash --> Gateway : "HTTPS/REST API"
+
+' API Gateway to Services
+Gateway --> AuthService : "Authentication"
+Gateway --> BusinessService : "Business Management"
+Gateway --> AppointmentService : "Booking Operations"
+Gateway --> NotificationService : "Notifications"
+Gateway --> CalendarService : "Calendar Sync"
+Gateway --> AnalyticsService : "Reports & Analytics"
+Gateway --> FileService : "File Operations"
+
+' Services to Infrastructure
+AuthService --> MessageQueue : "Events"
+BusinessService --> MessageQueue : "Events"
+AppointmentService --> MessageQueue : "Events"
+NotificationService --> MessageQueue : "Events"
+
+AuthService --> CacheLayer : "Sessions"
+AppointmentService --> CacheLayer : "Availability Cache"
+BusinessService --> CacheLayer : "Configuration Cache"
+
+AuthService --> PrimaryDB : "User Data"
+BusinessService --> PrimaryDB : "Business Data"
+AppointmentService --> PrimaryDB : "Appointment Data"
+AnalyticsService --> AnalyticsDB : "Analytics Data"
+FileService --> FileStorage : "File Storage"
+
+' External Service Connections
+NotificationService --> EmailProvider : "Email Delivery"
+NotificationService --> SMSProvider : "SMS Delivery"
+CalendarService --> GoogleAPIs : "Calendar Sync"
+BusinessService --> GoogleAPIs : "Maps & Location"
+AuthService --> GoogleAPIs : "OAuth Login"
+FileService --> CDN : "Asset Delivery"
+
+' Infrastructure Connections
+K8s --> AuthService : "Container Management"
+K8s --> BusinessService : "Container Management"
+K8s --> AppointmentService : "Container Management"
+K8s --> NotificationService : "Container Management"
+
+CICD --> K8s : "Deployment"
+Monitoring --> K8s : "Metrics Collection"
+Security --> Gateway : "Protection"
+
+LoggingService --> Monitoring : "Log Aggregation"
+ConfigService --> AuthService : "Configuration"
+ConfigService --> BusinessService : "Configuration"
+ConfigService --> AppointmentService : "Configuration"
+
+' Data Flow Arrows
+MessageQueue --> NotificationService : "Event Processing"
+MessageQueue --> AnalyticsService : "Data Processing"
+MessageQueue --> CalendarService : "Sync Events"
+
+note top of Gateway : "Single Entry Point\nRate Limiting: 1000 req/min\nAuthentication Required"
+
+note bottom of PrimaryDB : "Master-Slave Replication\nAutomated Backups\nEncryption at Rest"
+
+note right of MessageQueue : "Event-Driven Architecture\nAsync Processing\nReliable Delivery"
+
+note left of CacheLayer : "In-Memory Storage\nSub-millisecond Response\nCluster Mode"
+
+@enduml

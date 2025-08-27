@@ -1,0 +1,116 @@
+@startuml TurnoPlus_Sequence_ConfirmAppointment
+title Secuencia: Confirmación de Turno por Email
+
+actor "Cliente" as Customer
+participant "Email Client" as EmailClient
+participant "Frontend\n(React SPA)" as Frontend
+participant "API Gateway" as Gateway
+participant "Appointment Service" as AppointmentSvc
+participant "Calendar Service" as CalendarSvc
+participant "Notification Service" as NotificationSvc
+participant "Database" as DB
+participant "Google Calendar API" as GoogleAPI
+
+== Recepción y Click en Email ==
+
+Customer -> EmailClient: Abre email de confirmación
+EmailClient -> Customer: Muestra contenido con link de confirmación
+
+Customer -> EmailClient: Click en "Confirmar Turno"
+EmailClient -> Frontend: GET /appointment/confirm/:token
+
+== Validación y Confirmación ==
+
+activate Frontend
+Frontend -> Gateway: GET /public/appointments/:token/confirm
+activate Gateway
+
+Gateway -> AppointmentSvc: GET /appointments/confirm/:token
+activate AppointmentSvc
+
+AppointmentSvc -> DB: SELECT * FROM appointments WHERE confirmation_token = ?
+activate DB
+DB --> AppointmentSvc: appointment_data
+deactivate DB
+
+alt Token válido y turno pendiente
+    AppointmentSvc -> AppointmentSvc: validate_token()
+    AppointmentSvc -> AppointmentSvc: check_appointment_status()
+    
+    AppointmentSvc -> DB: UPDATE appointments SET status='confirmed', confirmed_at=NOW()
+    activate DB
+    DB --> AppointmentSvc: update_success
+    deactivate DB
+    
+    AppointmentSvc -> NotificationSvc: PUBLISH appointment_confirmed_event
+    activate NotificationSvc
+    
+    AppointmentSvc --> Gateway: 200 OK + appointment_confirmed
+    deactivate AppointmentSvc
+    
+    Gateway --> Frontend: 200 OK + confirmation_data
+    deactivate Gateway
+    
+    Frontend --> Customer: Página de confirmación exitosa
+    deactivate Frontend
+
+else Token inválido o expirado
+    AppointmentSvc --> Gateway: 400 Bad Request + error_message
+    deactivate AppointmentSvc
+    
+    Gateway --> Frontend: 400 Bad Request
+    deactivate Gateway
+    
+    Frontend --> Customer: Página de error con contacto
+    deactivate Frontend
+end
+
+== Integración con Google Calendar ==
+
+NotificationSvc -> NotificationSvc: process_appointment_confirmed_event()
+NotificationSvc -> DB: SELECT business + user + integration_settings
+activate DB
+DB --> NotificationSvc: integration_data
+deactivate DB
+
+alt Google Calendar integrado
+    NotificationSvc -> CalendarSvc: CREATE calendar_event
+    activate CalendarSvc
+    
+    CalendarSvc -> CalendarSvc: prepare_event_data()
+    CalendarSvc -> GoogleAPI: POST /calendar/v3/calendars/:calendarId/events
+    activate GoogleAPI
+    GoogleAPI --> CalendarSvc: event_created + event_id
+    deactivate GoogleAPI
+    
+    CalendarSvc -> DB: UPDATE appointments SET google_event_id = ?
+    activate DB
+    deactivate DB
+    
+    CalendarSvc --> NotificationSvc: calendar_event_created
+    deactivate CalendarSvc
+end
+
+== Notificación al Negocio ==
+
+NotificationSvc -> DB: SELECT business_users FOR business_id
+activate DB
+DB --> NotificationSvc: business_users[]
+deactivate DB
+
+NotificationSvc -> NotificationSvc: generate_business_notification()
+
+loop Para cada usuario del negocio
+    NotificationSvc -> DB: INSERT INTO notifications (user_id, type='appointment_confirmed')
+    activate DB
+    deactivate DB
+end
+
+NotificationSvc -> EmailProvider: send_business_notification_email()
+activate EmailProvider
+EmailProvider --> NotificationSvc: email_sent
+deactivate EmailProvider
+
+deactivate NotificationSvc
+
+@enduml

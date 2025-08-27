@@ -1,0 +1,149 @@
+@startuml TurnoPlus_Sequence_BookAppointment
+title Secuencia: Cliente Reserva un Turno
+
+actor "Cliente" as Customer
+participant "Frontend\n(React SPA)" as Frontend
+participant "API Gateway" as Gateway
+participant "Business Service" as BusinessSvc
+participant "Appointment Service" as AppointmentSvc
+participant "Notification Service" as NotificationSvc
+participant "Cache" as Cache
+participant "Database" as DB
+participant "Email Provider" as EmailProvider
+
+== Búsqueda de Negocio y Servicios ==
+
+Customer -> Frontend: Accede a /book/negocio-ejemplo
+activate Frontend
+
+Frontend -> Gateway: GET /businesses/negocio-ejemplo
+activate Gateway
+
+Gateway -> BusinessSvc: GET /businesses/by-slug/negocio-ejemplo
+activate BusinessSvc
+
+BusinessSvc -> Cache: CHECK business_cache_key
+activate Cache
+Cache --> BusinessSvc: MISS
+deactivate Cache
+
+BusinessSvc -> DB: SELECT * FROM businesses WHERE slug = ?
+activate DB
+DB --> BusinessSvc: business_data
+deactivate DB
+
+BusinessSvc -> Cache: SET business_cache (TTL: 1h)
+activate Cache
+deactivate Cache
+
+BusinessSvc --> Gateway: business_info + services
+deactivate BusinessSvc
+
+Gateway --> Frontend: 200 OK + business_data
+deactivate Gateway
+
+Frontend --> Customer: Muestra información del negocio y servicios
+deactivate Frontend
+
+== Consulta de Disponibilidad ==
+
+Customer -> Frontend: Selecciona servicio y fecha
+activate Frontend
+
+Frontend -> Gateway: GET /businesses/:id/availability?date=2025-08-24&service_id=123
+activate Gateway
+
+Gateway -> AppointmentSvc: GET /availability
+activate AppointmentSvc
+
+AppointmentSvc -> Cache: CHECK availability_2025-08-24_123
+activate Cache
+Cache --> AppointmentSvc: MISS
+deactivate Cache
+
+AppointmentSvc -> DB: SELECT schedule, exceptions, appointments
+activate DB
+DB --> AppointmentSvc: schedule_data
+deactivate DB
+
+AppointmentSvc -> AppointmentSvc: calculate_available_slots()
+
+AppointmentSvc -> Cache: SET availability_cache (TTL: 15min)
+activate Cache
+deactivate Cache
+
+AppointmentSvc --> Gateway: available_slots[]
+deactivate AppointmentSvc
+
+Gateway --> Frontend: 200 OK + slots
+deactivate Gateway
+
+Frontend --> Customer: Muestra slots disponibles
+deactivate Frontend
+
+== Creación de Reserva ==
+
+Customer -> Frontend: Completa formulario y confirma reserva
+activate Frontend
+
+Frontend -> Gateway: POST /public/appointments
+activate Gateway
+
+Gateway -> AppointmentSvc: POST /appointments
+activate AppointmentSvc
+
+AppointmentSvc -> AppointmentSvc: validate_customer_data()
+AppointmentSvc -> AppointmentSvc: check_slot_availability()
+
+AppointmentSvc -> DB: BEGIN TRANSACTION
+activate DB
+
+AppointmentSvc -> DB: INSERT INTO customers (if not exists)
+DB --> AppointmentSvc: customer_id
+
+AppointmentSvc -> DB: INSERT INTO appointments
+DB --> AppointmentSvc: appointment_id
+
+AppointmentSvc -> AppointmentSvc: generate_confirmation_token()
+
+AppointmentSvc -> DB: UPDATE appointments SET confirmation_token
+AppointmentSvc -> DB: COMMIT TRANSACTION
+deactivate DB
+
+AppointmentSvc -> Cache: DELETE availability_cache_*
+activate Cache
+deactivate Cache
+
+AppointmentSvc -> NotificationSvc: PUBLISH appointment_created_event
+activate NotificationSvc
+
+AppointmentSvc --> Gateway: 201 Created + appointment_data
+deactivate AppointmentSvc
+
+Gateway --> Frontend: 201 Created
+deactivate Gateway
+
+Frontend --> Customer: Muestra confirmación de reserva
+deactivate Frontend
+
+== Envío de Notificaciones ==
+
+NotificationSvc -> NotificationSvc: process_appointment_created_event()
+NotificationSvc -> DB: SELECT appointment + customer + business data
+activate DB
+DB --> NotificationSvc: complete_appointment_data
+deactivate DB
+
+NotificationSvc -> NotificationSvc: generate_email_template()
+NotificationSvc -> EmailProvider: send_confirmation_email()
+activate EmailProvider
+EmailProvider --> NotificationSvc: email_sent_id
+deactivate EmailProvider
+
+NotificationSvc -> DB: INSERT INTO notifications
+activate DB
+deactivate DB
+
+deactivate NotificationSvc
+
+@enduml

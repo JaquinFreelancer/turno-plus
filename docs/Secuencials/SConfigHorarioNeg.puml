@@ -1,0 +1,162 @@
+@startuml TurnoPlus_Sequence_BusinessSchedule
+title Secuencia: Configuración de Horarios de Negocio
+
+actor "Admin Negocio" as Admin
+participant "Frontend\n(React SPA)" as Frontend
+participant "API Gateway" as Gateway
+participant "Auth Service" as AuthSvc
+participant "Business Service" as BusinessSvc
+participant "Appointment Service" as AppointmentSvc
+participant "Cache" as Cache
+participant "Database" as DB
+
+== Acceso a Configuración ==
+
+Admin -> Frontend: Navega a /business/:id/schedule
+activate Frontend
+
+Frontend -> Gateway: GET /business/:id/schedules
+note right: Header: Authorization: Bearer <token>
+activate Gateway
+
+Gateway -> AuthSvc: VERIFY token + business_permissions
+activate AuthSvc
+AuthSvc -> AuthSvc: validate_business_access(user_id, business_id)
+AuthSvc --> Gateway: access_granted
+deactivate AuthSvc
+
+Gateway -> BusinessSvc: GET /businesses/:id/schedules
+activate BusinessSvc
+
+BusinessSvc -> Cache: GET business_schedule_:business_id
+activate Cache
+Cache --> BusinessSvc: MISS
+deactivate Cache
+
+BusinessSvc -> DB: SELECT * FROM business_schedules WHERE business_id = ?
+activate DB
+DB --> BusinessSvc: current_schedules[]
+deactivate DB
+
+BusinessSvc -> Cache: SET business_schedule_cache (TTL: 1h)
+activate Cache
+deactivate Cache
+
+BusinessSvc --> Gateway: 200 OK + current_schedules
+deactivate BusinessSvc
+
+Gateway --> Frontend: 200 OK + schedule_data
+deactivate Gateway
+
+Frontend --> Admin: Muestra configuración actual de horarios
+deactivate Frontend
+
+== Modificación de Horarios ==
+
+Admin -> Frontend: Modifica horarios de trabajo
+activate Frontend
+Frontend -> Frontend: validate_schedule_input()
+
+Frontend -> Gateway: PUT /business/:id/schedules
+note right: Body:\n{\n  "schedules": [\n    {"day": 1, "start": "09:00", "end": "18:00"},\n    {"day": 2, "start": "09:00", "end": "18:00"},\n    ...\n  ]\n}
+activate Gateway
+
+Gateway -> AuthSvc: VERIFY token + business_owner_permissions
+activate AuthSvc
+AuthSvc --> Gateway: access_granted
+deactivate AuthSvc
+
+Gateway -> BusinessSvc: PUT /schedules
+activate BusinessSvc
+
+BusinessSvc -> BusinessSvc: validate_schedule_data()
+BusinessSvc -> BusinessSvc: check_schedule_conflicts()
+
+== Validación de Impacto en Turnos Existentes ==
+
+BusinessSvc -> AppointmentSvc: CHECK future_appointments_impact
+activate AppointmentSvc
+
+AppointmentSvc -> DB: SELECT appointments WHERE business_id = ? AND appointment_date > CURRENT_DATE
+activate DB
+DB --> AppointmentSvc: future_appointments[]
+deactivate DB
+
+AppointmentSvc -> AppointmentSvc: analyze_schedule_conflicts()
+AppointmentSvc --> BusinessSvc: conflict_analysis
+deactivate AppointmentSvc
+
+alt Conflictos detectados
+    BusinessSvc --> Gateway: 409 Conflict + conflicted_appointments[]
+    deactivate BusinessSvc
+    
+    Gateway --> Frontend: 409 Conflict + conflicts_data
+    deactivate Gateway
+    
+    Frontend --> Admin: Muestra advertencia de conflictos
+    
+    Admin -> Frontend: Confirma cambios a pesar de conflictos
+    activate Frontend
+    
+    Frontend -> Gateway: PUT /business/:id/schedules?force=true
+    activate Gateway
+    
+    Gateway -> BusinessSvc: PUT /schedules (force=true)
+    activate BusinessSvc
+else Sin conflictos
+end
+
+== Actualización de Horarios ==
+
+BusinessSvc -> DB: BEGIN TRANSACTION
+activate DB
+
+BusinessSvc -> DB: DELETE FROM business_schedules WHERE business_id = ?
+DB --> BusinessSvc: deleted_count
+
+loop Para cada día de la semana
+    BusinessSvc -> DB: INSERT INTO business_schedules
+    DB --> BusinessSvc: schedule_id
+end
+
+BusinessSvc -> DB: COMMIT TRANSACTION
+deactivate DB
+
+== Invalidación de Cache y Recálculo ==
+
+BusinessSvc -> Cache: DELETE business_schedule_:business_id
+activate Cache
+deactivate Cache
+
+BusinessSvc -> Cache: DELETE availability_cache_business_:business_id_*
+activate Cache
+deactivate Cache
+
+BusinessSvc -> AppointmentSvc: NOTIFY schedule_updated_event
+activate AppointmentSvc
+AppointmentSvc -> AppointmentSvc: recalculate_all_availability()
+deactivate AppointmentSvc
+
+BusinessSvc --> Gateway: 200 OK + updated_schedules
+deactivate BusinessSvc
+
+Gateway --> Frontend: 200 OK + success_message
+deactivate Gateway
+
+Frontend --> Admin: Confirmación de actualización exitosa
+deactivate Frontend
+
+== Manejo de Turnos Conflictivos (Opcional) ==
+
+opt Si hay conflictos y se forzó el cambio
+    AppointmentSvc -> AppointmentSvc: process_conflicted_appointments()
+    
+    loop Para cada turno conflictivo
+        AppointmentSvc -> AppointmentSvc: send_conflict_notification()
+        AppointmentSvc -> DB: UPDATE appointments SET status = 'conflict_pending'
+        activate DB
+        deactivate DB
+    end
+end
+
+@enduml

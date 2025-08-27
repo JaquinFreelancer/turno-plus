@@ -1,0 +1,218 @@
+@startuml TurnoPlus_Sequence_GoogleCalendarSync
+title Secuencia: Sincronización con Google Calendar
+
+actor "Usuario" as User
+participant "Frontend\n(React SPA)" as Frontend
+participant "API Gateway" as Gateway
+participant "Auth Service" as AuthSvc
+participant "Calendar Service" as CalendarSvc
+participant "Google OAuth" as GoogleOAuth
+participant "Google Calendar API" as GoogleAPI
+participant "Database" as DB
+participant "Cache" as Cache
+
+== Configuración Inicial de Integración ==
+
+User -> Frontend: Navega a /integrations/google-calendar
+activate Frontend
+
+Frontend -> Gateway: GET /integrations/google-calendar/status
+activate Gateway
+
+Gateway -> AuthSvc: VERIFY token
+activate AuthSvc
+AuthSvc --> Gateway: token_valid
+deactivate AuthSvc
+
+Gateway -> CalendarSvc: GET /google-calendar/status
+activate CalendarSvc
+
+CalendarSvc -> DB: SELECT * FROM google_calendar_integrations WHERE user_id = ?
+activate DB
+DB --> CalendarSvc: integration_status
+deactivate DB
+
+CalendarSvc --> Gateway: integration_data
+deactivate CalendarSvc
+
+Gateway --> Frontend: 200 OK + current_status
+deactivate Gateway
+
+Frontend --> User: Muestra estado actual de integración
+deactivate Frontend
+
+== Proceso de Conexión con Google ==
+
+User -> Frontend: Click en "Conectar con Google Calendar"
+activate Frontend
+
+Frontend -> Gateway: POST /integrations/google-calendar/connect
+activate Gateway
+
+Gateway -> CalendarSvc: POST /google-calendar/init-oauth
+activate CalendarSvc
+
+CalendarSvc -> CalendarSvc: generate_state_parameter()
+CalendarSvc -> GoogleOAuth: GET authorization_url
+activate GoogleOAuth
+GoogleOAuth --> CalendarSvc: oauth_authorization_url
+deactivate GoogleOAuth
+
+CalendarSvc -> Cache: SET oauth_state_:state_id (TTL: 10min)
+activate Cache
+deactivate Cache
+
+CalendarSvc --> Gateway: oauth_url
+deactivate CalendarSvc
+
+Gateway --> Frontend: redirect_url
+deactivate Gateway
+
+Frontend --> User: Redirección a Google OAuth
+deactivate Frontend
+
+== Autorización en Google ==
+
+User -> GoogleOAuth: Autoriza acceso a calendario
+activate GoogleOAuth
+GoogleOAuth --> User: Redirección con authorization_code
+deactivate GoogleOAuth
+
+User -> Frontend: Callback /integrations/google-calendar/callback?code=AUTH_CODE&state=STATE
+activate Frontend
+
+Frontend -> Gateway: GET /integrations/google-calendar/callback
+activate Gateway
+
+Gateway -> CalendarSvc: GET /google-calendar/callback
+activate CalendarSvc
+
+CalendarSvc -> Cache: GET oauth_state_:state_id
+activate Cache
+Cache --> CalendarSvc: stored_state
+deactivate Cache
+
+CalendarSvc -> CalendarSvc: validate_state_parameter()
+
+CalendarSvc -> GoogleOAuth: POST /token (exchange code for tokens)
+activate GoogleOAuth
+GoogleOAuth --> CalendarSvc: {access_token, refresh_token, expires_in}
+deactivate GoogleOAuth
+
+== Configuración de Integración ==
+
+CalendarSvc -> GoogleAPI: GET /calendar/v3/users/me/calendarList
+note right: Header: Authorization: Bearer <access_token>
+activate GoogleAPI
+GoogleAPI --> CalendarSvc: user_calendars[]
+deactivate GoogleAPI
+
+CalendarSvc -> DB: BEGIN TRANSACTION
+activate DB
+
+CalendarSvc -> DB: INSERT INTO google_calendar_integrations
+DB --> CalendarSvc: integration_id
+
+CalendarSvc -> DB: COMMIT TRANSACTION
+deactivate DB
+
+CalendarSvc --> Gateway: integration_success + calendar_list
+deactivate CalendarSvc
+
+Gateway --> Frontend: 200 OK + success_data
+deactivate Gateway
+
+Frontend --> User: Confirmación de integración exitosa
+deactivate Frontend
+
+== Sincronización de Turno Existente ==
+
+note over User, GoogleAPI: Cuando se confirma un turno...
+
+participant "Appointment Service" as AppointmentSvc
+
+AppointmentSvc -> CalendarSvc: NOTIFY appointment_confirmed
+activate CalendarSvc
+
+CalendarSvc -> DB: SELECT integration WHERE business_id = ?
+activate DB
+DB --> CalendarSvc: integration_settings
+deactivate DB
+
+alt Integración activa
+    CalendarSvc -> CalendarSvc: prepare_calendar_event()
+    
+    CalendarSvc -> CalendarSvc: check_token_expiry()
+    
+    alt Token expirado
+        CalendarSvc -> GoogleOAuth: POST /token (refresh)
+        activate GoogleOAuth
+        GoogleOAuth --> CalendarSvc: new_access_token
+        deactivate GoogleOAuth
+        
+        CalendarSvc -> DB: UPDATE access_token, expires_at
+        activate DB
+        deactivate DB
+    end
+    
+    CalendarSvc -> GoogleAPI: POST /calendar/v3/calendars/:calendarId/events
+    note right: Body:\n{\n  "summary": "Turno - Servicio X",\n  "start": {"dateTime": "2025-08-24T14:00:00-03:00"},\n  "end": {"dateTime": "2025-08-24T15:00:00-03:00"},\n  "attendees": [{"email": "cliente@email.com"}]\n}
+    activate GoogleAPI
+    
+    alt Evento creado exitosamente
+        GoogleAPI --> CalendarSvc: event_created + event_id
+        
+        CalendarSvc -> DB: UPDATE appointments SET google_event_id = ?
+        activate DB
+        deactivate DB
+        
+    else Error en creación
+        GoogleAPI --> CalendarSvc: error_response
+        CalendarSvc -> CalendarSvc: log_sync_error()
+        CalendarSvc -> CalendarSvc: schedule_retry()
+    end
+    deactivate GoogleAPI
+    
+else Integración inactiva
+    CalendarSvc -> CalendarSvc: skip_sync()
+end
+
+deactivate CalendarSvc
+
+== Sincronización Bidireccional (Opcional) ==
+
+note over CalendarSvc, GoogleAPI: Sincronización periódica cada 15 minutos
+
+CalendarSvc -> CalendarSvc: periodic_sync_job()
+activate CalendarSvc
+
+CalendarSvc -> DB: SELECT active_integrations
+activate DB
+DB --> CalendarSvc: integrations[]
+deactivate DB
+
+loop Para cada integración activa
+    CalendarSvc -> GoogleAPI: GET /calendar/v3/calendars/:calendarId/events
+    note right: Parámetros:\n- timeMin: last_sync_time\n- timeMax: +30 days\n- updatedMin: last_sync_time
+    activate GoogleAPI
+    GoogleAPI --> CalendarSvc: calendar_events[]
+    deactivate GoogleAPI
+    
+    CalendarSvc -> CalendarSvc: detect_conflicts()
+    CalendarSvc -> CalendarSvc: sync_changes_to_turnoplus()
+    
+    opt Si hay conflictos
+        CalendarSvc -> AppointmentSvc: NOTIFY calendar_conflicts
+        activate AppointmentSvc
+        AppointmentSvc -> AppointmentSvc: handle_calendar_conflicts()
+        deactivate AppointmentSvc
+    end
+end
+
+CalendarSvc -> DB: UPDATE last_sync_time
+activate DB
+deactivate DB
+
+deactivate CalendarSvc
+
+@enduml

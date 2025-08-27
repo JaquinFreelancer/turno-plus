@@ -1,0 +1,400 @@
+@startuml TurnoPlus_Classes
+!define ABSTRACT abstract class
+!define INTERFACE interface
+!define ENUM enum
+
+' ==================== ENUMS ====================
+ENUM UserRole {
+    ADMIN
+    PROFESSIONAL
+}
+
+ENUM AppointmentStatus {
+    PENDING
+    CONFIRMED
+    CANCELLED
+    COMPLETED
+    NO_SHOW
+}
+
+ENUM NotificationType {
+    APPOINTMENT_CREATED
+    APPOINTMENT_CONFIRMED
+    APPOINTMENT_CANCELLED
+    REMINDER
+}
+
+ENUM UserBusinessRole {
+    OWNER
+    EMPLOYEE
+}
+
+' ==================== INTERFACES ====================
+INTERFACE INotificationService {
+    + sendEmail(recipient: string, subject: string, body: string): Promise<boolean>
+    + sendSMS(phoneNumber: string, message: string): Promise<boolean>
+}
+
+INTERFACE ICalendarService {
+    + createEvent(appointment: Appointment): Promise<string>
+    + updateEvent(eventId: string, appointment: Appointment): Promise<boolean>
+    + deleteEvent(eventId: string): Promise<boolean>
+}
+
+INTERFACE IRepository<T> {
+    + findById(id: number): Promise<T>
+    + findAll(): Promise<T[]>
+    + create(entity: T): Promise<T>
+    + update(id: number, entity: Partial<T>): Promise<T>
+    + delete(id: number): Promise<boolean>
+}
+
+' ==================== ABSTRACT CLASSES ====================
+ABSTRACT BaseEntity {
+    # id: number
+    # createdAt: Date
+    # updatedAt: Date
+    --
+    + getId(): number
+    + getCreatedAt(): Date
+    + getUpdatedAt(): Date
+    + setUpdatedAt(date: Date): void
+}
+
+ABSTRACT BaseService {
+    # repository: IRepository
+    --
+    + findById(id: number): Promise<any>
+    + findAll(): Promise<any[]>
+    # validateEntity(entity: any): ValidationResult
+}
+
+' ==================== DOMAIN ENTITIES ====================
+class User extends BaseEntity {
+    - email: string
+    - passwordHash: string
+    - firstName: string
+    - lastName: string
+    - phone: string
+    - role: UserRole
+    - isActive: boolean
+    - emailVerifiedAt: Date
+    --
+    + constructor(email: string, password: string, firstName: string, lastName: string)
+    + getFullName(): string
+    + isEmailVerified(): boolean
+    + verifyEmail(): void
+    + changePassword(newPassword: string): void
+    + activate(): void
+    + deactivate(): void
+    + hasRole(role: UserRole): boolean
+}
+
+class Business extends BaseEntity {
+    - name: string
+    - description: string
+    - address: string
+    - phone: string
+    - email: string
+    - website: string
+    - timezone: string
+    - isActive: boolean
+    --
+    + constructor(name: string, email: string, timezone: string)
+    + updateContactInfo(phone: string, email: string, website: string): void
+    + updateAddress(address: string): void
+    + activate(): void
+    + deactivate(): void
+    + getTimezone(): string
+}
+
+class Customer extends BaseEntity {
+    - firstName: string
+    - lastName: string
+    - email: string
+    - phone: string
+    --
+    + constructor(firstName: string, lastName: string, email: string, phone: string)
+    + getFullName(): string
+    + updateContactInfo(email: string, phone: string): void
+}
+
+class Service extends BaseEntity {
+    - businessId: number
+    - name: string
+    - description: string
+    - durationMinutes: number
+    - price: number
+    - isActive: boolean
+    --
+    + constructor(businessId: number, name: string, durationMinutes: number, price: number)
+    + updatePrice(newPrice: number): void
+    + updateDuration(newDuration: number): void
+    + activate(): void
+    + deactivate(): void
+    + getFormattedPrice(): string
+}
+
+class Appointment extends BaseEntity {
+    - businessId: number
+    - serviceId: number
+    - customerId: number
+    - userId: number
+    - appointmentDate: Date
+    - startTime: string
+    - endTime: string
+    - status: AppointmentStatus
+    - notes: string
+    - confirmationToken: string
+    - confirmedAt: Date
+    - reminderSentAt: Date
+    --
+    + constructor(businessId: number, serviceId: number, customerId: number, appointmentDate: Date, startTime: string)
+    + confirm(): void
+    + cancel(reason: string): void
+    + complete(): void
+    + markAsNoShow(): void
+    + addNotes(notes: string): void
+    + generateConfirmationToken(): string
+    + isConfirmed(): boolean
+    + canBeCancelled(): boolean
+    + getDateTime(): Date
+}
+
+class UserBusiness extends BaseEntity {
+    - userId: number
+    - businessId: number
+    - role: UserBusinessRole
+    - isActive: boolean
+    --
+    + constructor(userId: number, businessId: number, role: UserBusinessRole)
+    + activate(): void
+    + deactivate(): void
+    + changeRole(newRole: UserBusinessRole): void
+    + isOwner(): boolean
+    + isEmployee(): boolean
+}
+
+class BusinessSchedule extends BaseEntity {
+    - businessId: number
+    - dayOfWeek: number
+    - startTime: string
+    - endTime: string
+    - isActive: boolean
+    --
+    + constructor(businessId: number, dayOfWeek: number, startTime: string, endTime: string)
+    + activate(): void
+    + deactivate(): void
+    + updateTimes(startTime: string, endTime: string): void
+    + isWorkingDay(): boolean
+}
+
+class ScheduleException extends BaseEntity {
+    - businessId: number
+    - exceptionDate: Date
+    - isClosed: boolean
+    - startTime: string
+    - endTime: string
+    - reason: string
+    --
+    + constructor(businessId: number, exceptionDate: Date, isClosed: boolean, reason: string)
+    + updateTimes(startTime: string, endTime: string): void
+    + updateReason(reason: string): void
+}
+
+class Notification extends BaseEntity {
+    - userId: number
+    - appointmentId: number
+    - type: NotificationType
+    - title: string
+    - message: string
+    - isRead: boolean
+    - sentAt: Date
+    --
+    + constructor(userId: number, type: NotificationType, title: string, message: string)
+    + markAsRead(): void
+    + markAsSent(): void
+}
+
+class GoogleCalendarIntegration extends BaseEntity {
+    - userId: number
+    - businessId: number
+    - googleCalendarId: string
+    - accessToken: string
+    - refreshToken: string
+    - tokenExpiresAt: Date
+    - isActive: boolean
+    --
+    + constructor(userId: number, businessId: number, googleCalendarId: string)
+    + updateTokens(accessToken: string, refreshToken: string, expiresAt: Date): void
+    + isTokenValid(): boolean
+    + activate(): void
+    + deactivate(): void
+}
+
+' ==================== SERVICES ====================
+class AuthService extends BaseService {
+    - userRepository: IRepository<User>
+    - jwtSecret: string
+    --
+    + login(email: string, password: string): Promise<AuthResult>
+    + register(userData: CreateUserDTO): Promise<User>
+    + verifyToken(token: string): Promise<User>
+    + generateToken(user: User): string
+    + hashPassword(password: string): string
+    + comparePassword(password: string, hash: string): boolean
+}
+
+class AppointmentService extends BaseService {
+    - appointmentRepository: IRepository<Appointment>
+    - notificationService: INotificationService
+    - calendarService: ICalendarService
+    --
+    + createAppointment(appointmentData: CreateAppointmentDTO): Promise<Appointment>
+    + confirmAppointment(token: string): Promise<Appointment>
+    + cancelAppointment(id: number, reason: string): Promise<Appointment>
+    + getAvailableSlots(businessId: number, serviceId: number, date: Date): Promise<TimeSlot[]>
+    + sendReminders(): Promise<void>
+    + completeAppointment(id: number): Promise<Appointment>
+}
+
+class BusinessService extends BaseService {
+    - businessRepository: IRepository<Business>
+    - scheduleRepository: IRepository<BusinessSchedule>
+    --
+    + createBusiness(businessData: CreateBusinessDTO): Promise<Business>
+    + updateSchedule(businessId: number, schedules: BusinessSchedule[]): Promise<void>
+    + addException(businessId: number, exception: ScheduleException): Promise<ScheduleException>
+    + isBusinessOpen(businessId: number, date: Date, time: string): Promise<boolean>
+    + getBusinessHours(businessId: number, date: Date): Promise<BusinessHours>
+}
+
+class NotificationService implements INotificationService {
+    - emailProvider: IEmailProvider
+    - smsProvider: ISMSProvider
+    --
+    + sendEmail(recipient: string, subject: string, body: string): Promise<boolean>
+    + sendSMS(phoneNumber: string, message: string): Promise<boolean>
+    + sendAppointmentConfirmation(appointment: Appointment): Promise<void>
+    + sendAppointmentReminder(appointment: Appointment): Promise<void>
+    + sendAppointmentCancellation(appointment: Appointment): Promise<void>
+}
+
+class GoogleCalendarService implements ICalendarService {
+    - googleAuth: GoogleAuth
+    --
+    + createEvent(appointment: Appointment): Promise<string>
+    + updateEvent(eventId: string, appointment: Appointment): Promise<boolean>
+    + deleteEvent(eventId: string): Promise<boolean>
+    + syncAppointments(businessId: number): Promise<void>
+}
+
+' ==================== CONTROLLERS ====================
+class AppointmentController {
+    - appointmentService: AppointmentService
+    - authService: AuthService
+    --
+    + createAppointment(req: Request, res: Response): Promise<Response>
+    + getAppointments(req: Request, res: Response): Promise<Response>
+    + confirmAppointment(req: Request, res: Response): Promise<Response>
+    + cancelAppointment(req: Request, res: Response): Promise<Response>
+    + getAvailableSlots(req: Request, res: Response): Promise<Response>
+}
+
+class BusinessController {
+    - businessService: BusinessService
+    - authService: AuthService
+    --
+    + createBusiness(req: Request, res: Response): Promise<Response>
+    + getBusinessDetails(req: Request, res: Response): Promise<Response>
+    + updateBusiness(req: Request, res: Response): Promise<Response>
+    + manageSchedule(req: Request, res: Response): Promise<Response>
+}
+
+class AuthController {
+    - authService: AuthService
+    --
+    + login(req: Request, res: Response): Promise<Response>
+    + register(req: Request, res: Response): Promise<Response>
+    + verifyEmail(req: Request, res: Response): Promise<Response>
+    + refreshToken(req: Request, res: Response): Promise<Response>
+    + logout(req: Request, res: Response): Promise<Response>
+}
+
+' ==================== DTOs ====================
+class CreateAppointmentDTO {
+    + businessId: number
+    + serviceId: number
+    + customerFirstName: string
+    + customerLastName: string
+    + customerEmail: string
+    + customerPhone: string
+    + appointmentDate: string
+    + startTime: string
+    + notes: string
+}
+
+class CreateUserDTO {
+    + email: string
+    + password: string
+    + firstName: string
+    + lastName: string
+    + phone: string
+    + role: UserRole
+}
+
+class CreateBusinessDTO {
+    + name: string
+    + description: string
+    + address: string
+    + phone: string
+    + email: string
+    + website: string
+    + timezone: string
+}
+
+' ==================== RELATIONSHIPS ====================
+BaseEntity <|-- User
+BaseEntity <|-- Business
+BaseEntity <|-- Customer
+BaseEntity <|-- Service
+BaseEntity <|-- Appointment
+BaseEntity <|-- UserBusiness
+BaseEntity <|-- BusinessSchedule
+BaseEntity <|-- ScheduleException
+BaseEntity <|-- Notification
+BaseEntity <|-- GoogleCalendarIntegration
+
+BaseService <|-- AuthService
+BaseService <|-- AppointmentService
+BaseService <|-- BusinessService
+
+INotificationService <|.. NotificationService
+ICalendarService <|.. GoogleCalendarService
+
+AppointmentController --> AppointmentService
+BusinessController --> BusinessService
+AuthController --> AuthService
+
+AppointmentService --> INotificationService
+AppointmentService --> ICalendarService
+AppointmentService --> Appointment
+
+BusinessService --> Business
+BusinessService --> BusinessSchedule
+BusinessService --> ScheduleException
+
+User ||--o{ UserBusiness
+Business ||--o{ UserBusiness
+Business ||--o{ Service
+Business ||--o{ Appointment
+Business ||--o{ BusinessSchedule
+Business ||--o{ ScheduleException
+Customer ||--o{ Appointment
+Service ||--o{ Appointment
+User ||--o{ Appointment
+User ||--o{ Notification
+Appointment ||--o{ Notification
+User ||--o{ GoogleCalendarIntegration
+
+@enduml

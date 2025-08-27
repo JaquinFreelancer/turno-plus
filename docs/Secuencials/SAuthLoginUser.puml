@@ -1,0 +1,152 @@
+@startuml TurnoPlus_Sequence_Authentication
+title Secuencia: Autenticación y Login de Usuario
+
+actor "Usuario" as User
+participant "Frontend\n(React SPA)" as Frontend
+participant "API Gateway" as Gateway
+participant "Auth Service" as AuthSvc
+participant "Cache" as Cache
+participant "Database" as DB
+participant "Email Provider" as EmailProvider
+
+== Proceso de Login ==
+
+User -> Frontend: Accede a /login
+activate Frontend
+Frontend --> User: Muestra formulario de login
+
+User -> Frontend: Ingresa email y password
+Frontend -> Frontend: validate_form_data()
+
+Frontend -> Gateway: POST /auth/login
+note right: Body:\n{\n  "email": "usuario@ejemplo.com",\n  "password": "password123"\n}
+activate Gateway
+
+Gateway -> AuthSvc: POST /auth/login
+activate AuthSvc
+
+AuthSvc -> AuthSvc: validate_input()
+AuthSvc -> DB: SELECT * FROM users WHERE email = ?
+activate DB
+DB --> AuthSvc: user_data
+deactivate DB
+
+alt Usuario existe
+    AuthSvc -> AuthSvc: compare_password(input_password, stored_hash)
+    
+    alt Password correcto
+        alt Email verificado
+            AuthSvc -> AuthSvc: generate_jwt_token()
+            AuthSvc -> AuthSvc: generate_refresh_token()
+            
+            AuthSvc -> Cache: SET user_session_:user_id (TTL: 24h)
+            activate Cache
+            deactivate Cache
+            
+            AuthSvc -> DB: UPDATE users SET last_login_at = NOW()
+            activate DB
+            deactivate DB
+            
+            AuthSvc --> Gateway: 200 OK + {access_token, refresh_token, user_data}
+            deactivate AuthSvc
+            
+            Gateway --> Frontend: 200 OK + auth_data
+            deactivate Gateway
+            
+            Frontend -> Frontend: store_tokens_securely()
+            Frontend -> Frontend: redirect_to_dashboard()
+            Frontend --> User: Redirección a /dashboard
+            deactivate Frontend
+            
+        else Email no verificado
+            AuthSvc --> Gateway: 403 Forbidden + email_not_verified
+            deactivate AuthSvc
+            
+            Gateway --> Frontend: 403 + verification_required
+            deactivate Gateway
+            
+            Frontend --> User: Mensaje de verificación requerida
+            deactivate Frontend
+        end
+        
+    else Password incorrecto
+        AuthSvc -> AuthSvc: log_failed_attempt()
+        AuthSvc --> Gateway: 401 Unauthorized + invalid_credentials
+        deactivate AuthSvc
+        
+        Gateway --> Frontend: 401 Unauthorized
+        deactivate Gateway
+        
+        Frontend --> User: Error de credenciales inválidas
+        deactivate Frontend
+    end
+    
+else Usuario no existe
+    AuthSvc --> Gateway: 401 Unauthorized + user_not_found
+    deactivate AuthSvc
+    
+    Gateway --> Frontend: 401 Unauthorized
+    deactivate Gateway
+    
+    Frontend --> User: Error de credenciales inválidas
+    deactivate Frontend
+end
+
+== Verificación de Token en Requests Subsecuentes ==
+
+User -> Frontend: Navega a página protegida
+activate Frontend
+
+Frontend -> Frontend: get_stored_token()
+Frontend -> Gateway: GET /protected-resource
+note right: Header:\nAuthorization: Bearer <jwt_token>
+activate Gateway
+
+Gateway -> AuthSvc: VERIFY token
+activate AuthSvc
+
+AuthSvc -> AuthSvc: decode_jwt_token()
+
+alt Token válido
+    AuthSvc -> Cache: GET user_session_:user_id
+    activate Cache
+    Cache --> AuthSvc: session_data
+    deactivate Cache
+    
+    alt Sesión activa
+        AuthSvc --> Gateway: token_valid + user_info
+        deactivate AuthSvc
+        
+        Gateway -> Gateway: allow_request()
+        Gateway --> Frontend: 200 OK + protected_data
+        deactivate Gateway
+        
+        Frontend --> User: Muestra contenido protegido
+        deactivate Frontend
+        
+    else Sesión expirada
+        AuthSvc --> Gateway: 401 Unauthorized + session_expired
+        deactivate AuthSvc
+        
+        Gateway --> Frontend: 401 Unauthorized
+        deactivate Gateway
+        
+        Frontend -> Frontend: redirect_to_login()
+        Frontend --> User: Redirección a /login
+        deactivate Frontend
+    end
+    
+else Token inválido/expirado
+    AuthSvc --> Gateway: 401 Unauthorized + token_invalid
+    deactivate AuthSvc
+    
+    Gateway --> Frontend: 401 Unauthorized
+    deactivate Gateway
+    
+    Frontend -> Frontend: clear_tokens()
+    Frontend -> Frontend: redirect_to_login()
+    Frontend --> User: Redirección a /login
+    deactivate Frontend
+end
+
+@enduml
